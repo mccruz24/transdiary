@@ -49,16 +49,28 @@ class _JournalScreenState extends ConsumerState<JournalScreen>
   }
 }
 
-class _FeelingsTab extends ConsumerWidget {
+class _FeelingsTab extends ConsumerStatefulWidget {
   const _FeelingsTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_FeelingsTab> createState() => _FeelingsTabState();
+}
+
+class _FeelingsTabState extends ConsumerState<_FeelingsTab> {
+  bool _calendarMode = false;
+  DateTime _focusedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+
+  @override
+  Widget build(BuildContext context) {
     final diary = ref.watch(diaryProvider);
     return diary.when(
       loading: () => const TjLoading(),
-      error: (_, __) => const Center(child: Text('Could not load diary.')),
+      error: (e, _) => const Center(child: Text('Could not load diary.')),
       data: (entries) {
+        final byDay = <DateTime, DiaryEntry>{
+          for (final e in entries)
+            DateTime(e.date.year, e.date.month, e.date.day): e,
+        };
         return Column(
           children: [
             Padding(
@@ -71,6 +83,22 @@ class _FeelingsTab extends ConsumerWidget {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
+                  Semantics(
+                    button: true,
+                    label: _calendarMode
+                        ? 'Switch to timeline view'
+                        : 'Switch to calendar view',
+                    child: IconButton(
+                      tooltip: _calendarMode ? 'Timeline' : 'Calendar',
+                      onPressed: () =>
+                          setState(() => _calendarMode = !_calendarMode),
+                      icon: Icon(
+                        _calendarMode
+                            ? Icons.view_agenda_outlined
+                            : Icons.calendar_month_outlined,
+                      ),
+                    ),
+                  ),
                   FilledButton.tonal(
                     onPressed: () => _openEditor(context, ref),
                     child: const Text('Today'),
@@ -79,7 +107,7 @@ class _FeelingsTab extends ConsumerWidget {
               ),
             ),
             Expanded(
-              child: entries.isEmpty
+              child: entries.isEmpty && !_calendarMode
                   ? TjEmptyState(
                       title: 'No diary entries',
                       message:
@@ -87,6 +115,22 @@ class _FeelingsTab extends ConsumerWidget {
                       actionLabel: 'Write today',
                       onAction: () => _openEditor(context, ref),
                       icon: Icons.edit_note_outlined,
+                    )
+                  : _calendarMode
+                  ? _DiaryCalendar(
+                      focusedMonth: _focusedMonth,
+                      entriesByDay: byDay,
+                      onMonthChanged: (m) => setState(() => _focusedMonth = m),
+                      onDaySelected: (day) {
+                        final existing =
+                            byDay[DateTime(day.year, day.month, day.day)];
+                        _openEditor(
+                          context,
+                          ref,
+                          existing: existing,
+                          initialDate: day,
+                        );
+                      },
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.all(16),
@@ -129,9 +173,143 @@ class _FeelingsTab extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref, {
     DiaryEntry? existing,
+    DateTime? initialDate,
   }) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DiaryEditorScreen(existing: existing)),
+      MaterialPageRoute(
+        builder: (_) =>
+            DiaryEditorScreen(existing: existing, initialDate: initialDate),
+      ),
+    );
+  }
+}
+
+class _DiaryCalendar extends StatelessWidget {
+  const _DiaryCalendar({
+    required this.focusedMonth,
+    required this.entriesByDay,
+    required this.onMonthChanged,
+    required this.onDaySelected,
+  });
+
+  final DateTime focusedMonth;
+  final Map<DateTime, DiaryEntry> entriesByDay;
+  final ValueChanged<DateTime> onMonthChanged;
+  final ValueChanged<DateTime> onDaySelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.tjColors;
+    final first = DateTime(focusedMonth.year, focusedMonth.month, 1);
+    final daysInMonth = DateTime(
+      focusedMonth.year,
+      focusedMonth.month + 1,
+      0,
+    ).day;
+    final leading = first.weekday % 7; // Sunday-first grid
+    final cells = leading + daysInMonth;
+    final rows = (cells + 6) ~/ 7;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Previous month',
+              onPressed: () => onMonthChanged(
+                DateTime(focusedMonth.year, focusedMonth.month - 1),
+              ),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Expanded(
+              child: Text(
+                DateFormat.yMMMM().format(focusedMonth),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Next month',
+              onPressed: () => onMonthChanged(
+                DateTime(focusedMonth.year, focusedMonth.month + 1),
+              ),
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (final label in ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+              Expanded(
+                child: Center(
+                  child: Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        for (var row = 0; row < rows; row++)
+          Row(
+            children: [
+              for (var col = 0; col < 7; col++)
+                Expanded(
+                  child: Builder(
+                    builder: (context) {
+                      final index = row * 7 + col;
+                      final dayNum = index - leading + 1;
+                      if (dayNum < 1 || dayNum > daysInMonth) {
+                        return const SizedBox(height: 44);
+                      }
+                      final day = DateTime(
+                        focusedMonth.year,
+                        focusedMonth.month,
+                        dayNum,
+                      );
+                      final key = DateTime(day.year, day.month, day.day);
+                      final hasEntry = entriesByDay.containsKey(key);
+                      final now = DateTime.now();
+                      final isToday =
+                          key == DateTime(now.year, now.month, now.day);
+                      return Semantics(
+                        button: true,
+                        label:
+                            '${DateFormat.yMMMEd().format(day)}${hasEntry ? ', has entry' : ''}',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => onDaySelected(day),
+                          child: Container(
+                            height: 44,
+                            margin: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: hasEntry
+                                  ? colors.sage.withValues(alpha: 0.18)
+                                  : null,
+                              border: isToday
+                                  ? Border.all(color: colors.sage)
+                                  : null,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text('$dayNum'),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        const SizedBox(height: 12),
+        Text(
+          'Tap a day to open or create that entry.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
     );
   }
 }
@@ -274,25 +452,40 @@ class _PhotosTab extends ConsumerStatefulWidget {
 
 class _PhotosTabState extends ConsumerState<_PhotosTab> {
   String _tagFilter = '';
+  DateTimeRange? _dateFilter;
 
   @override
   Widget build(BuildContext context) {
     final photos = ref.watch(photosProvider);
     return photos.when(
       loading: () => const TjLoading(),
-      error: (_, __) => const Center(child: Text('Could not load photos.')),
+      error: (e, _) => const Center(child: Text('Could not load photos.')),
       data: (items) {
-        final filtered = _tagFilter.trim().isEmpty
-            ? items
-            : items
-                  .where(
-                    (p) => p.tags.any(
-                      (t) => t.toLowerCase().contains(
-                        _tagFilter.trim().toLowerCase(),
-                      ),
-                    ),
-                  )
-                  .toList();
+        var filtered = items;
+        if (_tagFilter.trim().isNotEmpty) {
+          final q = _tagFilter.trim().toLowerCase();
+          filtered = filtered
+              .where((p) => p.tags.any((t) => t.toLowerCase().contains(q)))
+              .toList();
+        }
+        if (_dateFilter != null) {
+          final start = DateTime(
+            _dateFilter!.start.year,
+            _dateFilter!.start.month,
+            _dateFilter!.start.day,
+          );
+          final end = DateTime(
+            _dateFilter!.end.year,
+            _dateFilter!.end.month,
+            _dateFilter!.end.day,
+            23,
+            59,
+            59,
+          );
+          filtered = filtered
+              .where((p) => !p.date.isBefore(start) && !p.date.isAfter(end))
+              .toList();
+        }
         return Column(
           children: [
             Padding(
@@ -309,7 +502,35 @@ class _PhotosTabState extends ConsumerState<_PhotosTab> {
                       onChanged: (v) => setState(() => _tagFilter = v),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: _dateFilter == null
+                        ? 'Filter by date'
+                        : 'Clear date filter',
+                    onPressed: () async {
+                      if (_dateFilter != null) {
+                        setState(() => _dateFilter = null);
+                        return;
+                      }
+                      final now = DateTime.now();
+                      final range = await showDateRangePicker(
+                        context: context,
+                        firstDate: DateTime(2000),
+                        lastDate: now,
+                        initialDateRange: DateTimeRange(
+                          start: now.subtract(const Duration(days: 30)),
+                          end: now,
+                        ),
+                      );
+                      if (range != null) {
+                        setState(() => _dateFilter = range);
+                      }
+                    },
+                    icon: Icon(
+                      _dateFilter == null
+                          ? Icons.date_range_outlined
+                          : Icons.event_busy_outlined,
+                    ),
+                  ),
                   FilledButton(
                     onPressed: () => _addPhoto(context),
                     child: const Text('Add'),

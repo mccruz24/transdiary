@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:transition_journal/app/providers.dart';
 import 'package:transition_journal/core/theme/tj_theme.dart';
+import 'package:transition_journal/core/utils/motion.dart';
 import 'package:transition_journal/core/widgets/tj_widgets.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -46,7 +47,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.tjColors;
-    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    final reduceMotion = prefersReducedMotion(context);
 
     return Scaffold(
       body: DecoratedBox(

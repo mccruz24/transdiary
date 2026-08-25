@@ -81,8 +81,16 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
                   ),
                   icon: Icons.science_outlined,
                 )
-              else
-                ...filtered.map((r) => _BloodTile(record: r)),
+              else if (_filterName != null)
+                ...filtered.map((r) => _BloodTile(record: r))
+              else ...[
+                for (final name in names) ...[
+                  TjSectionHeader(name),
+                  ...filtered
+                      .where((r) => r.testName == name)
+                      .map((r) => _BloodTile(record: r)),
+                ],
+              ],
             ],
           );
         },

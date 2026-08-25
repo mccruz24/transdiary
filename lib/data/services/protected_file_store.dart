@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -19,9 +21,14 @@ abstract class ProtectedFileStore {
 }
 
 class LocalProtectedFileStore implements ProtectedFileStore {
-  LocalProtectedFileStore({Uuid? uuid}) : _uuid = uuid ?? const Uuid();
+  LocalProtectedFileStore({Uuid? uuid, MethodChannel? channel})
+    : _uuid = uuid ?? const Uuid(),
+      _channel =
+          channel ??
+          const MethodChannel('com.transitionjournal/file_protection');
 
   final Uuid _uuid;
+  final MethodChannel _channel;
 
   Future<Directory> _mediaRoot() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -48,8 +55,21 @@ class LocalProtectedFileStore implements ProtectedFileStore {
         p.extension(source.path).replaceFirst('.', '').ifEmpty('jpg');
     final destPath = p.join(dir.path, '${_uuid.v4()}.$ext');
     await source.copy(destPath);
-    // Best-effort: attempt iOS file protection via method channel name reserved for later.
+    await _applyFileProtection(destPath);
     return destPath;
+  }
+
+  Future<void> _applyFileProtection(String path) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) return;
+    try {
+      await _channel.invokeMethod<void>('setCompleteUntilFirstUnlock', {
+        'path': path,
+      });
+    } on MissingPluginException {
+      // Channel unavailable in tests / non-iOS runners.
+    } on PlatformException {
+      // Best-effort; never log paths or health data.
+    }
   }
 
   @override

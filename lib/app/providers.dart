@@ -59,6 +59,12 @@ final bloodTestsProvider = StreamProvider<List<BloodTestRecord>>((ref) {
   return ref.watch(repositoriesProvider).watchBloodTests();
 });
 
+final remindersProvider = FutureProvider<List<Reminder>>((ref) async {
+  // Re-read when regimens change so home "today" stays fresh.
+  ref.watch(regimensProvider);
+  return ref.watch(repositoriesProvider).getAllReminders();
+});
+
 final onboardingCompleteProvider = FutureProvider<bool>((ref) async {
   return ref.watch(repositoriesProvider).onboardingComplete;
 });

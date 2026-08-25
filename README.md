@@ -74,7 +74,8 @@ flutter run -d <ios-device-or-simulator>   # macOS + Xcode required for iOS
 ## Privacy decisions
 
 - SQLite + sandboxed media files only
-- App-lock preference stored in secure storage
+- App-lock preference stored in secure storage (Keychain on iOS)
+- iOS media files get `NSFileProtectionCompleteUntilFirstUserAuthentication` via MethodChannel `com.transitionjournal/file_protection`
 - Default notification: “It’s time for your reminder.”
 - Detailed notifications are opt-in with a lock-screen sensitivity warning
 - Deleting a photo/attachment record deletes the local file

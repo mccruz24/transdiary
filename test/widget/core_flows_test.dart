@@ -4,7 +4,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:transition_journal/core/theme/tj_theme.dart';
 import 'package:transition_journal/core/widgets/tj_widgets.dart';
 import 'package:transition_journal/domain/enums/app_enums.dart';
+import 'package:transition_journal/domain/models/models.dart';
 import 'package:transition_journal/features/onboarding/onboarding_screen.dart';
+import 'package:transition_journal/features/regimens/dose_log_sheet.dart';
+
+Regimen _sampleRegimen() {
+  final now = DateTime(2026, 1, 1);
+  return Regimen(
+    id: 'r1',
+    category: HormoneCategory.estrogen,
+    medicationName: 'Estradiol',
+    doseAmount: 2,
+    doseUnit: 'mg',
+    route: AdministrationRoute.oral,
+    startDate: now,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  );
+}
 
 void main() {
   testWidgets('disclaimer banner shows clinician guidance', (tester) async {
@@ -41,6 +59,25 @@ void main() {
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pump();
     expect(tester.widget<FilledButton>(continueBtn).onPressed, isNotNull);
+  });
+
+  testWidgets('dose log sheet exposes non-prescriptive statuses', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildTjTheme(brightness: Brightness.light),
+          home: Scaffold(body: DoseLogSheet(regimens: [_sampleRegimen()])),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Log a dose'), findsOneWidget);
+    expect(find.textContaining('will not suggest'), findsOneWidget);
+    expect(find.text('Taken'), findsOneWidget);
+    expect(find.text('Skipped'), findsOneWidget);
+    expect(find.text('Missed'), findsOneWidget);
   });
 
   test('dose status labels are non-prescriptive', () {

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:transition_journal/app/providers.dart';
 import 'package:transition_journal/core/theme/tj_theme.dart';
+import 'package:transition_journal/core/utils/reminder_scheduler.dart';
 import 'package:transition_journal/core/widgets/tj_widgets.dart';
 import 'package:transition_journal/domain/enums/app_enums.dart';
 import 'package:transition_journal/domain/models/models.dart';
@@ -18,6 +19,7 @@ class HomeScreen extends ConsumerWidget {
     final regimens = ref.watch(activeRegimensProvider);
     final doses = ref.watch(doseLogsProvider);
     final diary = ref.watch(diaryProvider);
+    final reminders = ref.watch(remindersProvider);
     final colors = context.tjColors;
     final today = DateFormat.yMMMEd().format(DateTime.now());
 
@@ -30,7 +32,13 @@ class HomeScreen extends ConsumerWidget {
             alignment: Alignment.centerLeft,
             child: Padding(
               padding: const EdgeInsets.only(left: 16, bottom: 8),
-              child: Text(today, style: Theme.of(context).textTheme.bodyMedium),
+              child: Semantics(
+                header: true,
+                child: Text(
+                  today,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
             ),
           ),
         ),
@@ -41,6 +49,10 @@ class HomeScreen extends ConsumerWidget {
         data: (active) {
           final recentDoses = doses.asData?.value.take(5).toList() ?? [];
           final recentDiary = diary.asData?.value.take(3).toList() ?? [];
+          final todayReminders = _todaysReminders(
+            reminders: reminders.asData?.value ?? const [],
+            regimens: active,
+          );
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
@@ -91,6 +103,42 @@ class HomeScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 20),
+              const TjSectionHeader(
+                "Today's reminders",
+                subtitle: 'Local schedules for today. Delivery is best-effort.',
+              ),
+              if (todayReminders.isEmpty)
+                Text(
+                  active.isEmpty
+                      ? 'Reminders appear here after you add an active regimen.'
+                      : 'No reminders scheduled for today.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                )
+              else
+                ...todayReminders.map(
+                  (item) => Semantics(
+                    label:
+                        'Reminder at ${item.$1.timeOfDay.format24h()} for ${item.$2.medicationName}',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.notifications_outlined,
+                        color: colors.sage,
+                      ),
+                      title: Text(item.$2.medicationName),
+                      subtitle: Text(
+                        '${item.$1.timeOfDay.format24h()} · ${item.$1.scheduleType.label}',
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Log dose',
+                        onPressed: () =>
+                            showDoseLogSheet(context, ref, [item.$2]),
+                        icon: const Icon(Icons.check_circle_outline),
+                      ),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
               const TjSectionHeader(
                 'Quick dose',
                 subtitle: 'Mark taken, skipped, or missed.',
@@ -166,6 +214,38 @@ class HomeScreen extends ConsumerWidget {
     DoseStatus.skipped => Icons.remove_circle_outline,
     DoseStatus.missed => Icons.schedule_outlined,
   };
+
+  List<(Reminder, Regimen)> _todaysReminders({
+    required List<Reminder> reminders,
+    required List<Regimen> regimens,
+  }) {
+    final now = DateTime.now();
+    final start = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(const Duration(seconds: 1));
+    final end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final byId = {for (final r in regimens) r.id: r};
+    final items = <(Reminder, Regimen)>[];
+    for (final reminder in reminders.where((r) => r.isEnabled)) {
+      final regimen = byId[reminder.regimenId];
+      if (regimen == null || !regimen.isActive) continue;
+      final next = ReminderScheduler.nextOccurrences(
+        reminder: reminder,
+        from: start,
+        count: 1,
+      );
+      if (next.isEmpty) continue;
+      if (!next.first.isAfter(end)) {
+        items.add((reminder, regimen));
+      }
+    }
+    items.sort(
+      (a, b) => a.$1.timeOfDayMinutes.compareTo(b.$1.timeOfDayMinutes),
+    );
+    return items;
+  }
 }
 
 class _QuickDoseTile extends ConsumerWidget {
@@ -174,42 +254,45 @@ class _QuickDoseTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Card(
-      elevation: 0,
-      color: context.tjColors.surfaceElevated.withValues(alpha: 0.7),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    regimen.medicationName,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  Text('${regimen.doseLabel} · ${regimen.routeLabel}'),
-                ],
+    return Semantics(
+      label: 'Quick dose for ${regimen.medicationName}',
+      child: Card(
+        elevation: 0,
+        color: context.tjColors.surfaceElevated.withValues(alpha: 0.7),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      regimen.medicationName,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text('${regimen.doseLabel} · ${regimen.routeLabel}'),
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Taken',
-              onPressed: () => _log(ref, DoseStatus.taken),
-              icon: const Icon(Icons.check),
-            ),
-            IconButton(
-              tooltip: 'Skipped',
-              onPressed: () => _log(ref, DoseStatus.skipped),
-              icon: const Icon(Icons.remove),
-            ),
-            IconButton(
-              tooltip: 'Missed',
-              onPressed: () => _log(ref, DoseStatus.missed),
-              icon: const Icon(Icons.schedule),
-            ),
-          ],
+              IconButton(
+                tooltip: 'Taken',
+                onPressed: () => _log(ref, DoseStatus.taken),
+                icon: const Icon(Icons.check),
+              ),
+              IconButton(
+                tooltip: 'Skipped',
+                onPressed: () => _log(ref, DoseStatus.skipped),
+                icon: const Icon(Icons.remove),
+              ),
+              IconButton(
+                tooltip: 'Missed',
+                onPressed: () => _log(ref, DoseStatus.missed),
+                icon: const Icon(Icons.schedule),
+              ),
+            ],
+          ),
         ),
       ),
     );
